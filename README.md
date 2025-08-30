@@ -1,41 +1,118 @@
-# Roblox Networker Class
+# Roblox Networker Class  
 
-This class is supposed to help you manage your RemoteEvents, UnreliableRemoteEvents, BindableEvents, RemoteFunctions and BindableFunctions more easily.
-This class also clears up all the mess in ReplicatedStorage and more while making the game, because Events are lazy loaded.
+The **Networker Class** provides a clean and scalable abstraction layer for managing communication between **Server ↔ Client** and **intra-context (Server ↔ Server, Client ↔ Client)** interactions in Roblox.  
 
-# Types used in API documentation
+It encapsulates and streamlines the use of:  
+- `RemoteEvent`  
+- `UnreliableRemoteEvent`  
+- `BindableEvent`  
+- `RemoteFunction`  
+- `BindableFunction`  
 
-Callback: (...any) -> any
+By **lazy-loading events and functions**, the Networker eliminates clutter in `ReplicatedStorage`, resulting in a more maintainable and efficient architecture.  
 
-# API
+---
 
-:OnEvent(signalName: string, callback: Callback), returns none -> Waits for a RemoteEvent (Used for communication between Server & Client), automatically uses either OnServerEvent or OnClientEvent<br/>
+## Key Benefits  
+- Centralized networking logic with a consistent API.  
+- Lazy-loading strategy to reduce `ReplicatedStorage` pollution.  
+- Unified handling of events and functions across server and client contexts.  
+- Support for both **reliable** and **unreliable** communication.  
 
-:OnEventUnreliable(signalName: string, callback: Callback), returns none -> Same as :OnEvent, but it uses an <b>UnreliableRemoteEvent</b><br/>
+---
 
-:OnBindableEvent(signalName: string, callback: Callback), returns none -> Waits for a BindableEvent (Used for communication between Server & Server or Client & Client)
+## Types Used  
 
-:OnInvoke(signalName: string, callback: Callback), returns none -> Waits for a RemoteFunction (Used for yielding communication between Server & Client, also lets you "return" values back with a simple return), automatically uses either OnServerInvoke or OnClientInvoke<br/>
+```lua
+-- A callback is any function receiving arbitrary parameters and optionally returning values.
+type Callback = (...any) -> any
+```
 
-:OnBindableInvoke(signalName: string, callback: Callback), returns none -> Waits for a BindableFunction (Used for yielding communication between Server & Server or Client & Client, also lets you "return" values back with a simple return)<br/>
+---
 
+## API Reference  
 
-:FireClient(signalName: string, player: Player, ...: any), returns none -> Fires a RemoteEvent from the Server to the Client specified with (player: Player)<br/>
+### Event Handling  
+- **`OnEvent(signalName: string, callback: Callback)`**  
+  Listens for a `RemoteEvent` (Server ↔ Client). Automatically uses `OnServerEvent` or `OnClientEvent`.  
 
-:FireClientUnreliable(signalName: string, player: Player, ...: any), returns none -> Same as :FireClient, but it uses an <b>UnreliableRemoteEvent</b><br/>
+- **`OnEventUnreliable(signalName: string, callback: Callback)`**  
+  Same as `OnEvent`, but uses an `UnreliableRemoteEvent`.  
 
-:FireAllClients(signalName: string, ...: any), returns none -> Same as :FireClient but it notifies ALL clients instead of one<br/>
+- **`OnBindableEvent(signalName: string, callback: Callback)`**  
+  Listens for a `BindableEvent` (Server ↔ Server or Client ↔ Client).  
 
-:FireAllClientsUnreliable(signalName: string, ...: any), returns none -> Same as :FireAllClients, but it uses an <b>UnreliableRemoteEvent</b><br/>
+---
 
-:FireServer(signalName: string, ...: any), returns none -> Fires a RemoteEvent from the Client to the Server <br/>
+### Function Handling  
+- **`OnInvoke(signalName: string, callback: Callback)`**  
+  Listens for a `RemoteFunction` (Server ↔ Client). Supports returning values via `return`.  
 
-:FireServerUnreliable(signalName: string, ...: any), returns none -> Same as :FireServer, but it uses an <b>UnreliableRemoteEvent</b><br/>
+- **`OnBindableInvoke(signalName: string, callback: Callback)`**  
+  Listens for a `BindableFunction` (Server ↔ Server or Client ↔ Client). Supports returning values via `return`.  
 
-:Fire(signalName: string, ...: any), returns none -> Fires a BindableEvent from Client to Client or Server to Server <br/>
+---
 
-:InvokeClient(signalName: string, player: Player, ...: any), returns (any) -> Fires a RemoteFunction from Server to Client <br/>
+### Firing Events  
+- **`FireClient(signalName: string, player: Player, ...: any)`**  
+  Fires a `RemoteEvent` from Server → Client.  
 
-:InvokeServer(signalName: string, ...: any), returns (any) -> Fires a RemoteFunction from Client to Server <br/>
+- **`FireClientUnreliable(signalName: string, player: Player, ...: any)`**  
+  Same as above, but uses an `UnreliableRemoteEvent`.  
 
-:Invoke(signalName: string, ...: any), returns (any) -> Fires a BindableFunction from Client to Client or Server to Server <br/>
+- **`FireAllClients(signalName: string, ...: any)`**  
+  Fires a `RemoteEvent` from Server → **all clients**.  
+
+- **`FireAllClientsUnreliable(signalName: string, ...: any)`**  
+  Same as above, but uses an `UnreliableRemoteEvent`.  
+
+- **`FireServer(signalName: string, ...: any)`**  
+  Fires a `RemoteEvent` from Client → Server.  
+
+- **`FireServerUnreliable(signalName: string, ...: any)`**  
+  Same as above, but uses an `UnreliableRemoteEvent`.  
+
+- **`Fire(signalName: string, ...: any)`**  
+  Fires a `BindableEvent` (Client ↔ Client or Server ↔ Server).  
+
+---
+
+### Invoking Functions  
+- **`InvokeClient(signalName: string, player: Player, ...: any): any`**  
+  Invokes a `RemoteFunction` from Server → Client.  
+
+- **`InvokeServer(signalName: string, ...: any): any`**  
+  Invokes a `RemoteFunction` from Client → Server.  
+
+- **`Invoke(signalName: string, ...: any): any`**  
+  Invokes a `BindableFunction` (Client ↔ Client or Server ↔ Server).  
+
+---
+
+## Example Usage  
+
+### Server Script Example
+```lua
+local Networker = require(path.to.Networker)
+
+-- Listening for an event from clients
+Networker:OnEvent("PlayerJumped", function(player, jumpPower)
+    print(player.Name .. " jumped with power " .. jumpPower)
+end)
+
+-- Sending data to all clients
+Networker:FireAllClients("MatchStart", os.time())
+```
+
+### Client Script Example
+```lua
+local Networker = require(path.to.Networker)
+
+-- Listening for server broadcasts
+Networker:OnEvent("MatchStart", function(startTime)
+    print("Match started at timestamp:", startTime)
+end)
+
+-- Firing an event to the server
+Networker:FireServer("PlayerJumped", 50)
+```

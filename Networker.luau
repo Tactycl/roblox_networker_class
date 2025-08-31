@@ -28,6 +28,32 @@ export type Networker = {
 	remoteConnections: {[string]: RBXScriptConnection},
 	
 	_init: (self: Networker) -> (),
+	_getWaitingSignalsByName: (self: Networker, signalName: string) -> ({WaitingSignal}),
+	_initRemote: (self: Networker, signalName: string, remote: SignalObject) -> (),
+	_registerSignal: (self: Networker, signalName: string, obj: SignalObject) -> (),
+	_createSignal: (self: Networker, signalName: string, isFunctionCall: boolean, isBindable: boolean, isUnreliable: boolean) -> (SignalObject?),
+	_fireRemote: (self: Networker, remote: SignalObject, ...any) -> (),
+	_getOrCreate: (self: Networker, signalName: string, isFunctionCall: boolean, isBindable: boolean, isUnreliable: boolean) -> (SignalObject?),
+	
+	OnEvent: (self: Networker, signalName: string, callback: Callback) -> (),
+	OnEventUnreliable: (self: Networker, signalName: string, callback: Callback) -> (),
+	OnBindableEvent: (self: Networker, signalName: string, callback: Callback) -> (),
+	OnInvoke: (self: Networker, signalName: string, callback: Callback) -> (),
+	OnBindableInvoke: (self: Networker, signalName: string, callback: Callback) -> (),
+
+	FireClient: (self: Networker, signalName: string, player: Player, ...any) -> (),
+	FireClientUnreliable: (self: Networker, signalName: string, player: Player, ...any) -> (),
+	FireAllClients: (self: Networker, signalName: string, ...any) -> (),
+	FireAllClientsUnreliable: (self: Networker, signalName: string, ...any) -> (),
+
+	InvokeClient: (self: Networker, signalName: string, player: Player, ...any) -> any,
+
+	FireServer: (self: Networker, signalName: string, ...any) -> (),
+	FireServerUnreliable: (self: Networker, signalName: string, ...any) -> (),
+	InvokeServer: (self: Networker, signalName: string, ...any) -> any,
+
+	Fire: (self: Networker, signalName: string, ...any) -> (),
+	Invoke: (self: Networker, signalName: string, ...any) -> any,
 }
 
 local function resolveSignalType(isFunctionCall: boolean, isBindable: boolean, isUnreliable: boolean): SignalType

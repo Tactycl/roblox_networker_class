@@ -108,7 +108,7 @@ function Networker:_initRemote(signalName: string, remote: SignalObject)
 	if not self.signalWrappers[signalName] then
 		self.signalWrappers[signalName] = Signal.new()
 	end
-	
+
 	local wrapper = self.signalWrappers[signalName]
 	if self.remoteConnections[signalName] then
 		self.remoteConnections[signalName]:Disconnect()
@@ -125,7 +125,7 @@ function Networker:_initRemote(signalName: string, remote: SignalObject)
 				wrapper:Fire(...)
 			end)
 		end
-		
+
 	elseif remote:IsA("UnreliableRemoteEvent") then
 		if IS_CLIENT then
 			self.remoteConnections[signalName] = remote.OnClientEvent:Connect(function(...)
@@ -145,17 +145,30 @@ function Networker:_initRemote(signalName: string, remote: SignalObject)
 	elseif remote:IsA("RemoteFunction") then
 		if IS_CLIENT then
 			remote.OnClientInvoke = function(...)
-				return wrapper:Fire(...)
+				local listeners = self.signalWrappers[signalName]._listeners
+				local listener = listeners[#listeners]
+				if listener then
+					return listener.callback(...)
+				end
 			end
+			
 		else
 			remote.OnServerInvoke = function(...)
-				return wrapper:Fire(...)
+				local listeners = self.signalWrappers[signalName]._listeners
+				local listener = listeners[#listeners]
+				if listener then
+					return listener.callback(...)
+				end
 			end
 		end
 
 	elseif remote:IsA("BindableFunction") then
 		remote.OnInvoke = function(...)
-			return wrapper:Fire(...)
+			local listeners = self.signalWrappers[signalName]._listeners
+			local listener = listeners[#listeners]
+			if listener then
+				return listener.callback(...)
+			end
 		end
 	end
 end

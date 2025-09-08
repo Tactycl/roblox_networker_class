@@ -3,6 +3,8 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local Signal = require(script.Parent.Signal)
+
 local Networker = {}
 Networker.__index = Networker
 
@@ -14,32 +16,25 @@ local FOLDER_NAME = "NetworkerEvents"
 -- Types
 export type SignalType = "RemoteEvent" | "UnreliableRemoteEvent" | "BindableEvent" | "RemoteFunction" | "BindableFunction"
 export type SignalObject = RemoteEvent | UnreliableRemoteEvent | BindableEvent | RemoteFunction | BindableFunction
-export type Callback = (...any) -> any
-export type WaitingSignal = {
-	signalName: string,
-	callback: Callback,
-	assignedRemote: SignalObject?,
-}
 
 export type Networker = {
 	eventsFolder: Folder?,
 	registeredSignals: {[string]: SignalObject},
-	waitingSignals: {WaitingSignal},
+	signalWrappers: {[string]: Signal.Signal},
 	remoteConnections: {[string]: RBXScriptConnection},
-	
+
 	_init: (self: Networker) -> (),
-	_getWaitingSignalsByName: (self: Networker, signalName: string) -> ({WaitingSignal}),
 	_initRemote: (self: Networker, signalName: string, remote: SignalObject) -> (),
 	_registerSignal: (self: Networker, signalName: string, obj: SignalObject) -> (),
 	_createSignal: (self: Networker, signalName: string, isFunctionCall: boolean, isBindable: boolean, isUnreliable: boolean) -> (SignalObject?),
 	_fireRemote: (self: Networker, remote: SignalObject, ...any) -> (),
 	_getOrCreate: (self: Networker, signalName: string, isFunctionCall: boolean, isBindable: boolean, isUnreliable: boolean) -> (SignalObject?),
-	
-	OnEvent: (self: Networker, signalName: string, callback: Callback) -> (),
-	OnEventUnreliable: (self: Networker, signalName: string, callback: Callback) -> (),
-	OnBindableEvent: (self: Networker, signalName: string, callback: Callback) -> (),
-	OnInvoke: (self: Networker, signalName: string, callback: Callback) -> (),
-	OnBindableInvoke: (self: Networker, signalName: string, callback: Callback) -> (),
+
+	OnEvent: (self: Networker, signalName: string) -> Signal.Signal,
+	OnEventUnreliable: (self: Networker, signalName: string) -> Signal.Signal,
+	OnBindableEvent: (self: Networker, signalName: string) -> Signal.Signal,
+	OnInvoke: (self: Networker, signalName: string) -> Signal.Signal,
+	OnBindableInvoke: (self: Networker, signalName: string) -> Signal.Signal,
 
 	FireClient: (self: Networker, signalName: string, player: Player, ...any) -> (),
 	FireClientUnreliable: (self: Networker, signalName: string, player: Player, ...any) -> (),
@@ -78,7 +73,7 @@ function Networker.new(): Networker
 	local self = (setmetatable({}, Networker):: unknown):: Networker
 	self.eventsFolder = nil
 	self.registeredSignals = {}
-	self.waitingSignals = {}
+	self.signalWrappers = {}
 	self.remoteConnections = {}
 	self:_init()
 
@@ -103,78 +98,65 @@ function Networker:_init()
 		end
 
 	else
-		self.eventsFolder = ReplicatedStorage:FindFirstChild(FOLDER_NAME)
 		self.eventsFolder = Instance.new("Folder")
 		self.eventsFolder.Name = FOLDER_NAME
 		self.eventsFolder.Parent = ReplicatedStorage
 	end
 end
 
-function Networker:_getWaitingSignalsByName(signalName: string): {WaitingSignal}
-	local out = {}
-	for _, waiting in self.waitingSignals do
-		if waiting.signalName == signalName then
-			table.insert(out, waiting)
-		end
-	end
-	return out
-end
-
 function Networker:_initRemote(signalName: string, remote: SignalObject)
+	if not self.signalWrappers[signalName] then
+		self.signalWrappers[signalName] = Signal.new()
+	end
+	
+	local wrapper = self.signalWrappers[signalName]
 	if self.remoteConnections[signalName] then
 		self.remoteConnections[signalName]:Disconnect()
 		self.remoteConnections[signalName] = nil
 	end
 
-	local function callSignals(...)
-		for _, waiting in self:_getWaitingSignalsByName(signalName) do
-			waiting.callback(...)
-		end
-	end
-
-	local function callSignal(...)
-		local waitingSignals = self:_getWaitingSignalsByName(signalName)
-		local waitingSignal = waitingSignals[#waitingSignals]
-		if not waitingSignal then
-			return nil
-		end
-		
-		return waitingSignal.callback(...)
-	end
-
-	local con: RBXScriptConnection? = nil
 	if remote:IsA("RemoteEvent") then
 		if IS_CLIENT then
-			con = remote.OnClientEvent:Connect(callSignals)
-
+			self.remoteConnections[signalName] = remote.OnClientEvent:Connect(function(...)
+				wrapper:Fire(...)
+			end)
 		else
-			con = remote.OnServerEvent:Connect(callSignals)
+			self.remoteConnections[signalName] = remote.OnServerEvent:Connect(function(...)
+				wrapper:Fire(...)
+			end)
 		end
 		
 	elseif remote:IsA("UnreliableRemoteEvent") then
 		if IS_CLIENT then
-			con = remote.OnClientEvent:Connect(callSignals)
-
+			self.remoteConnections[signalName] = remote.OnClientEvent:Connect(function(...)
+				wrapper:Fire(...)
+			end)
 		else
-			con = remote.OnServerEvent:Connect(callSignals)
+			self.remoteConnections[signalName] = remote.OnServerEvent:Connect(function(...)
+				wrapper:Fire(...)
+			end)
 		end
 
 	elseif remote:IsA("BindableEvent") then
-		con = remote.Event:Connect(callSignals)
+		self.remoteConnections[signalName] = remote.Event:Connect(function(...)
+			wrapper:Fire(...)
+		end)
 
 	elseif remote:IsA("RemoteFunction") then
 		if IS_CLIENT then
-			remote.OnClientInvoke = callSignal
+			remote.OnClientInvoke = function(...)
+				return wrapper:Fire(...)
+			end
 		else
-			remote.OnServerInvoke = callSignal
+			remote.OnServerInvoke = function(...)
+				return wrapper:Fire(...)
+			end
 		end
 
 	elseif remote:IsA("BindableFunction") then
-		remote.OnInvoke = callSignal
-	end
-
-	if con then
-		self.remoteConnections[signalName] = con
+		remote.OnInvoke = function(...)
+			return wrapper:Fire(...)
+		end
 	end
 end
 
@@ -183,13 +165,10 @@ function Networker:_registerSignal(signalName: string, obj: SignalObject)
 		self.registeredSignals[signalName]:Destroy()
 		self.registeredSignals[signalName] = nil
 		self.remoteConnections[signalName] = nil
+		self.signalWrappers[signalName] = nil
 	end
 
 	self.registeredSignals[signalName] = obj
-	for _, waiting in self:_getWaitingSignalsByName(signalName) do
-		waiting.assignedRemote = obj
-	end
-
 	self:_initRemote(signalName, obj)
 end
 
@@ -215,15 +194,13 @@ function Networker:_fireRemote(remote: SignalObject, ...: any)
 	if remote:IsA("RemoteEvent") then
 		if IS_CLIENT then
 			remote:FireServer(...)
-
 		else
 			error("Use FireClient or FireAllClients for RemoteEvents")
 		end
-		
+
 	elseif remote:IsA("UnreliableRemoteEvent") then
 		if IS_CLIENT then
 			remote:FireServer(...)
-
 		else
 			error("Use FireClient or FireAllClients for RemoteEvents")
 		end
@@ -234,7 +211,6 @@ function Networker:_fireRemote(remote: SignalObject, ...: any)
 	elseif remote:IsA("RemoteFunction") then
 		if IS_CLIENT then
 			return remote:InvokeServer(...)
-
 		else
 			error("Use InvokeClient for RemoteFunctions")
 		end
@@ -249,64 +225,37 @@ function Networker:_getOrCreate(signalName: string, isFunctionCall: boolean, isB
 	if not remote then
 		remote = self:_createSignal(signalName, isFunctionCall, isBindable, isUnreliable)
 	end
+	if not self.signalWrappers[signalName] then
+		self.signalWrappers[signalName] = Signal.new()
+	end
 	return remote
 end
 
 -- Public API --
 
-function Networker:OnEvent(signalName: string, callback: Callback)
-	local remote = self:_getOrCreate(signalName, false, false, false)
-	local entry: WaitingSignal = {
-		signalName = signalName,
-		callback = callback,
-		assignedRemote = remote,
-	}
-
-	table.insert(self.waitingSignals, entry)
+function Networker:OnEvent(signalName: string): Signal.Signal
+	self:_getOrCreate(signalName, false, false, false)
+	return self.signalWrappers[signalName]
 end
 
-function Networker:OnEventUnreliable(signalName: string, callback: Callback)
-	local remote = self:_getOrCreate(signalName, false, false, true)
-	local entry: WaitingSignal = {
-		signalName = signalName,
-		callback = callback,
-		assignedRemote = remote,
-	}
-
-	table.insert(self.waitingSignals, entry)
+function Networker:OnEventUnreliable(signalName: string): Signal.Signal
+	self:_getOrCreate(signalName, false, false, true)
+	return self.signalWrappers[signalName]
 end
 
-function Networker:OnBindableEvent(signalName: string, callback: Callback)
-	local remote = self:_getOrCreate(signalName, false, true, false)
-	local entry: WaitingSignal = {
-		signalName = signalName,
-		callback = callback,
-		assignedRemote = remote,
-	}
-
-	table.insert(self.waitingSignals, entry)
+function Networker:OnBindableEvent(signalName: string): Signal.Signal
+	self:_getOrCreate(signalName, false, true, false)
+	return self.signalWrappers[signalName]
 end
 
-function Networker:OnInvoke(signalName: string, callback: Callback)
-	local remote = self:_getOrCreate(signalName, true, false, false)
-	local entry: WaitingSignal = {
-		signalName = signalName,
-		callback = callback,
-		assignedRemote = remote,
-	}
-
-	table.insert(self.waitingSignals, entry)
+function Networker:OnInvoke(signalName: string): Signal.Signal
+	self:_getOrCreate(signalName, true, false, false)
+	return self.signalWrappers[signalName]
 end
 
-function Networker:OnBindableInvoke(signalName: string, callback: Callback)
-	local remote = self:_getOrCreate(signalName, true, true, false)
-	local entry: WaitingSignal = {
-		signalName = signalName,
-		callback = callback,
-		assignedRemote = remote,
-	}
-
-	table.insert(self.waitingSignals, entry)
+function Networker:OnBindableInvoke(signalName: string): Signal.Signal
+	self:_getOrCreate(signalName, true, true, false)
+	return self.signalWrappers[signalName]
 end
 
 function Networker:FireClient(signalName: string, player: Player, ...: any)
@@ -371,7 +320,7 @@ function Networker:InvokeServer(signalName: string, ...: any): any
 	if remote then
 		return self:_fireRemote(remote, ...)
 	end
-	return
+	return nil
 end
 
 function Networker:Fire(signalName: string, ...: any)
@@ -386,7 +335,7 @@ function Networker:Invoke(signalName: string, ...: any): any
 	if remote then
 		return self:_fireRemote(remote, ...)
 	end
-	return
+	return nil
 end
 
 return Networker.new()

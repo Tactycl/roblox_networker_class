@@ -145,30 +145,17 @@ function Networker:_initRemote(signalName: string, remote: SignalObject)
 	elseif remote:IsA("RemoteFunction") then
 		if IS_CLIENT then
 			remote.OnClientInvoke = function(...)
-				local listeners = self.signalWrappers[signalName]._listeners
-				local listener = listeners[#listeners]
-				if listener then
-					return listener.callback(...)
-				end
+				return wrapper:Invoke(...)
 			end
-			
 		else
 			remote.OnServerInvoke = function(...)
-				local listeners = self.signalWrappers[signalName]._listeners
-				local listener = listeners[#listeners]
-				if listener then
-					return listener.callback(...)
-				end
+				return wrapper:Invoke(...)
 			end
 		end
 
 	elseif remote:IsA("BindableFunction") then
 		remote.OnInvoke = function(...)
-			local listeners = self.signalWrappers[signalName]._listeners
-			local listener = listeners[#listeners]
-			if listener then
-				return listener.callback(...)
-			end
+			return wrapper:Invoke(...)
 		end
 	end
 end

@@ -14,16 +14,16 @@ It streamlines the usage of:
 - `RemoteFunction`  
 - `BindableFunction`  
 
-The Networker leverages **lazy-loading and auto-registration** to reduce clutter in `ReplicatedStorage`, minimize boilerplate, and enforce a consistent API for all networking use cases.  
+Unlike naive implementations that generate a new remote object for every signal, the Networker uses a **multiplexed design**. All communication is routed through a fixed set of five core instances in `ReplicatedStorage`, keyed by signal name. This reduces replication clutter, simplifies debugging, and enforces a consistent API across all contexts.
 
 ---
 
 ## Key Features  
-- Single API for all event and function types.  
-- Reliable & Unreliable communication support (`RemoteEvent` vs `UnreliableRemoteEvent`).  
-- Intra-context communication (server ↔ server, client ↔ client) using bindables.  
-- Lazy-loaded signals – automatically creates or resolves networking objects only when required.  
-- Signal wrapper integration powered by [`roblox_signal_class`](https://github.com/Tactycl/roblox_signal_class).  
+- Unified API for all event and function types.  
+- Multiplexed communication – one set of core instances, unlimited signals.  
+- Reliable & Unreliable support (`RemoteEvent` vs `UnreliableRemoteEvent`).  
+- Intra-context communication (server ↔ server, client ↔ client) via bindables.  
+- Signal wrapper integration powered by [`roblox_signal_class`](https://github.com/Tactycl/roblox_signal_class).
 
 ---
 

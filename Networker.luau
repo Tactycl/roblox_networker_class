@@ -8,334 +8,317 @@ local Signal = require(script.Parent.Signal)
 local Networker = {}
 Networker.__index = Networker
 
--- Singleton
 local _instance: Networker? = nil
 local IS_CLIENT = RunService:IsClient()
 local FOLDER_NAME = "NetworkerEvents"
-
--- Types
-export type SignalType = "RemoteEvent" | "UnreliableRemoteEvent" | "BindableEvent" | "RemoteFunction" | "BindableFunction"
-export type SignalObject = RemoteEvent | UnreliableRemoteEvent | BindableEvent | RemoteFunction | BindableFunction
-
-export type Networker = {
-	eventsFolder: Folder?,
-	registeredSignals: {[string]: SignalObject},
-	signalWrappers: {[string]: Signal.Signal},
-	remoteConnections: {[string]: RBXScriptConnection},
-
-	_init: (self: Networker) -> (),
-	_initRemote: (self: Networker, signalName: string, remote: SignalObject) -> (),
-	_registerSignal: (self: Networker, signalName: string, obj: SignalObject) -> (),
-	_createSignal: (self: Networker, signalName: string, isFunctionCall: boolean, isBindable: boolean, isUnreliable: boolean) -> (SignalObject?),
-	_fireRemote: (self: Networker, remote: SignalObject, ...any) -> (),
-	_getOrCreate: (self: Networker, signalName: string, isFunctionCall: boolean, isBindable: boolean, isUnreliable: boolean) -> (SignalObject?),
-
-	OnEvent: (self: Networker, signalName: string) -> Signal.Signal,
-	OnEventUnreliable: (self: Networker, signalName: string) -> Signal.Signal,
-	OnBindableEvent: (self: Networker, signalName: string) -> Signal.Signal,
-	OnInvoke: (self: Networker, signalName: string) -> Signal.Signal,
-	OnBindableInvoke: (self: Networker, signalName: string) -> Signal.Signal,
-
-	FireClient: (self: Networker, signalName: string, player: Player, ...any) -> (),
-	FireClientUnreliable: (self: Networker, signalName: string, player: Player, ...any) -> (),
-	FireAllClients: (self: Networker, signalName: string, ...any) -> (),
-	FireAllClientsUnreliable: (self: Networker, signalName: string, ...any) -> (),
-
-	InvokeClient: (self: Networker, signalName: string, player: Player, ...any) -> any,
-
-	FireServer: (self: Networker, signalName: string, ...any) -> (),
-	FireServerUnreliable: (self: Networker, signalName: string, ...any) -> (),
-	InvokeServer: (self: Networker, signalName: string, ...any) -> any,
-
-	Fire: (self: Networker, signalName: string, ...any) -> (),
-	Invoke: (self: Networker, signalName: string, ...any) -> any,
+local EVENT_INSTANCES = {
+	"RemoteEvent",
+	"UnreliableRemoteEvent",
+	"BindableEvent",
+	"RemoteFunction",
+	"BindableFunction",
 }
 
-local function resolveSignalType(isFunctionCall: boolean, isBindable: boolean, isUnreliable: boolean): SignalType
-	if isFunctionCall then
-		return (isBindable and "BindableFunction") or "RemoteFunction"
-	else
-		if isBindable then
-			return "BindableEvent"
-		elseif isUnreliable then
-			return "UnreliableRemoteEvent"
-		else
-			return "RemoteEvent"
-		end
-	end
-end
+type SignalObject = RemoteEvent | UnreliableRemoteEvent | BindableEvent | RemoteFunction | BindableFunction
+type EventIdentifier = string
+type Callback = (...any) -> (...any)
+
+export type Networker = {
+	Folder: Folder?,
+	
+	signalWrappers: {[EventIdentifier]: Signal.Signal},
+	functionWrappers: {[EventIdentifier]: Callback},
+	instances: {[string]: SignalObject},
+	
+	_resolveExpectedObject: (self: Networker, Adornee: Instance, name: string) -> (Instance?),
+	_throwUnexpectedEvent: (self: Networker) -> (),
+	_init: (self: Networker) -> (),
+	_fireWrapper: (signalName: EventIdentifier, ...any) -> (),
+	_fireReceiver: (signalName: EventIdentifier, ...any) -> (),
+	_getOrCreateWrapper: (self: Networker, signalName: EventIdentifier) -> (Signal.Signal),
+	_setReceiving: (self: Networker, signalName: EventIdentifier, func: Callback) -> (),
+	
+	OnEvent: (self: Networker, signalName: EventIdentifier) -> (Signal.Signal),
+	OnEventUnreliable: (self: Networker, signalName: EventIdentifier) -> (Signal.Signal),
+	OnBindableEvent: (self: Networker, signalName: EventIdentifier) -> (Signal.Signal),
+	OnInvoke: (self: Networker, signalName: EventIdentifier, func: Callback) -> (),
+	OnBindableInvoke: (self: Networker, signalName: EventIdentifier, func: Callback) -> (),
+	
+	FireClient: (self: Networker, signalName: EventIdentifier, player: Player, ...any) -> (),
+	FireAllClients: (self: Networker, signalName: EventIdentifier, ...any) -> (),
+	FireAllClientsExcept: (self: Networker, signalName: EventIdentifier, exceptPlayer: Player, ...any) -> (),
+	
+	FireClientUnreliable: (self: Networker, signalName: EventIdentifier, player: Player, ...any) -> (),
+	FireAllClientsUnreliable: (self: Networker, signalName: EventIdentifier, ...any) -> (),
+	FireAllClientsExceptUnreliable: (self: Networker, signalName: EventIdentifier, exceptPlayer: Player, ...any) -> (),
+	
+	FireServer: (self: Networker, signalName: EventIdentifier, ...any) -> (),
+	FireServerUnreliable: (self: Networker, signalName: EventIdentifier, ...any) -> (),
+	
+	Fire: (self: Networker, signalName: EventIdentifier, ...any) -> (),
+	
+	InvokeClient: (self: Networker, signalName: EventIdentifier, player: Player, ...any) -> (...any),
+	InvokeServer: (self: Networker, signalName: EventIdentifier, ...any) -> (...any),
+	Invoke: (self: Networker, signalName: EventIdentifier, ...any) -> (...any),
+}
 
 function Networker.new(): Networker
 	if _instance then
 		return _instance
 	end
-
+	
 	local self = (setmetatable({}, Networker):: unknown):: Networker
-	self.eventsFolder = nil
-	self.registeredSignals = {}
+	self.Folder = nil
 	self.signalWrappers = {}
-	self.remoteConnections = {}
+	self.functionWrappers = {}
+	self.instances = {}
 	self:_init()
-
+	
 	_instance = self
 	return self
 end
 
+function Networker:_resolveExpectedObject(Adornee: Instance, name: string)
+	local object = Adornee:WaitForChild(name, 5)
+	if not object then
+		local networkSide = if IS_CLIENT then "client" else "server"
+		error("Failed to require 'Networker' on the " .. networkSide .. ". Check if you require 'Networker' on both client and server on startup.")
+	end
+	
+	return object
+end
+
+function Networker:_throwUnexpectedEvent()
+	error("Event was fired but no EventIdentifier was attached.", 2)
+end
+
 function Networker:_init()
 	if IS_CLIENT then
-		self.eventsFolder = ReplicatedStorage:WaitForChild(FOLDER_NAME)
-		self.eventsFolder.ChildAdded:Connect(function(obj)
-			if self.registeredSignals[obj.Name] == obj then return end
-			if obj:IsA("RemoteEvent") or obj:IsA("UnreliableRemoteEvent") or obj:IsA("BindableEvent") or obj:IsA("RemoteFunction") or obj:IsA("BindableFunction") then
-				self:_registerSignal(obj.Name, obj)
-			end
-		end)
-
-		for _, obj in self.eventsFolder:GetChildren() do
-			if obj:IsA("RemoteEvent") or obj:IsA("UnreliableRemoteEvent") or obj:IsA("BindableEvent") or obj:IsA("RemoteFunction") or obj:IsA("BindableFunction") then
-				self:_registerSignal(obj.Name, obj)
-			end
-		end
-
+		self.Folder = self:_resolveExpectedObject(ReplicatedStorage, FOLDER_NAME)
+		
 	else
-		self.eventsFolder = Instance.new("Folder")
-		self.eventsFolder.Name = FOLDER_NAME
-		self.eventsFolder.Parent = ReplicatedStorage
+		self.Folder = ReplicatedStorage:FindFirstChild(FOLDER_NAME) or Instance.new("Folder")
+		self.Folder.Name = FOLDER_NAME
+		
+		for _, instanceName in EVENT_INSTANCES do
+			local instance = Instance.new(instanceName)
+			instance.Name = instanceName
+			instance.Parent = self.Folder
+		end
+		
+		self.Folder.Parent = ReplicatedStorage
+	end
+	
+	for _, instanceName in EVENT_INSTANCES do
+		local instance = self:_resolveExpectedObject(self.Folder, instanceName)
+		
+		if instance:IsA("RemoteEvent") or instance:IsA("UnreliableRemoteEvent") then
+			if IS_CLIENT then
+				instance.OnClientEvent:Connect(function(signalName: EventIdentifier, ...)
+					self:_fireWrapper(signalName, ...)
+				end)
+				
+			else
+				instance.OnServerEvent:Connect(function(player: Player, signalName: EventIdentifier, ...)
+					self:_fireWrapper(signalName, unpack({player, ...}))
+				end)
+			end
+			
+		elseif instance:IsA("BindableEvent") then
+			instance.Event:Connect(function(signalName: EventIdentifier, ...)
+				self:_fireWrapper(signalName, ...)
+			end)
+			
+		elseif instance:IsA("RemoteFunction") then
+			if IS_CLIENT then
+				instance.OnClientInvoke = function(signalName: EventIdentifier, ...)
+					return self:_fireReceiver(signalName, ...)
+				end
+				
+			else
+				instance.OnServerInvoke = function(signalName: EventIdentifier, ...)
+					return self:_fireReceiver(signalName, ...)
+				end
+			end
+			
+		elseif instance:IsA("BindableFunction") then
+			instance.OnInvoke = function(signalName: EventIdentifier, ...)
+				return self:_fireReceiver(signalName, ...)
+			end
+		end
+		
+		self.instances[instanceName] = instance
 	end
 end
 
-function Networker:_initRemote(signalName: string, remote: SignalObject)
-	if not self.signalWrappers[signalName] then
-		self.signalWrappers[signalName] = Signal.new()
+function Networker:_fireWrapper(signalName: EventIdentifier, ...)
+	if typeof(signalName) ~= "string" then
+		self:_throwUnexpectedEvent()
 	end
-
+	
 	local wrapper = self.signalWrappers[signalName]
-	if self.remoteConnections[signalName] then
-		self.remoteConnections[signalName]:Disconnect()
-		self.remoteConnections[signalName] = nil
+	if not wrapper then
+		return
 	end
-
-	if remote:IsA("RemoteEvent") then
-		if IS_CLIENT then
-			self.remoteConnections[signalName] = remote.OnClientEvent:Connect(function(...)
-				wrapper:Fire(...)
-			end)
-		else
-			self.remoteConnections[signalName] = remote.OnServerEvent:Connect(function(...)
-				wrapper:Fire(...)
-			end)
-		end
-
-	elseif remote:IsA("UnreliableRemoteEvent") then
-		if IS_CLIENT then
-			self.remoteConnections[signalName] = remote.OnClientEvent:Connect(function(...)
-				wrapper:Fire(...)
-			end)
-		else
-			self.remoteConnections[signalName] = remote.OnServerEvent:Connect(function(...)
-				wrapper:Fire(...)
-			end)
-		end
-
-	elseif remote:IsA("BindableEvent") then
-		self.remoteConnections[signalName] = remote.Event:Connect(function(...)
-			wrapper:Fire(...)
-		end)
-
-	elseif remote:IsA("RemoteFunction") then
-		if IS_CLIENT then
-			remote.OnClientInvoke = function(...)
-				return wrapper:Invoke(...)
-			end
-		else
-			remote.OnServerInvoke = function(...)
-				return wrapper:Invoke(...)
-			end
-		end
-
-	elseif remote:IsA("BindableFunction") then
-		remote.OnInvoke = function(...)
-			return wrapper:Invoke(...)
-		end
-	end
+	
+	wrapper:Fire(...)
 end
 
-function Networker:_registerSignal(signalName: string, obj: SignalObject)
-	if self.registeredSignals[signalName] then
-		self.registeredSignals[signalName]:Destroy()
-		self.registeredSignals[signalName] = nil
-		self.remoteConnections[signalName] = nil
-		self.signalWrappers[signalName] = nil
+function Networker:_fireReceiver(signalName: EventIdentifier, ...)
+	if typeof(signalName) ~= "string" then
+		self:_throwUnexpectedEvent()
 	end
-
-	self.registeredSignals[signalName] = obj
-	self:_initRemote(signalName, obj)
+	
+	local receiver = self.functionWrappers[signalName]
+	if not receiver then
+		return
+	end
+	
+	return receiver(...)
 end
 
-function Networker:_createSignal(signalName: string, isFunctionCall: boolean, isBindable: boolean, isUnreliable: boolean): SignalObject?
-	local signalType = resolveSignalType(isFunctionCall, isBindable, isUnreliable)
-	if IS_CLIENT and (signalType ~= "BindableEvent" and signalType ~= "BindableFunction") then
-		return nil
-	end
-
-	if not self.eventsFolder then
-		return nil
-	end
-
-	local newSignal = Instance.new(signalType)
-	newSignal.Name = signalName
-	newSignal.Parent = self.eventsFolder
-
-	self:_registerSignal(signalName, newSignal)
-	return newSignal
-end
-
-function Networker:_fireRemote(remote: SignalObject, ...: any)
-	if remote:IsA("RemoteEvent") then
-		if IS_CLIENT then
-			remote:FireServer(...)
-		else
-			error("Use FireClient or FireAllClients for RemoteEvents")
-		end
-
-	elseif remote:IsA("UnreliableRemoteEvent") then
-		if IS_CLIENT then
-			remote:FireServer(...)
-		else
-			error("Use FireClient or FireAllClients for RemoteEvents")
-		end
-
-	elseif remote:IsA("BindableEvent") then
-		remote:Fire(...)
-
-	elseif remote:IsA("RemoteFunction") then
-		if IS_CLIENT then
-			return remote:InvokeServer(...)
-		else
-			error("Use InvokeClient for RemoteFunctions")
-		end
-
-	elseif remote:IsA("BindableFunction") then
-		return remote:Invoke(...)
-	end
-end
-
-function Networker:_getOrCreate(signalName: string, isFunctionCall: boolean, isBindable: boolean, isUnreliable: boolean): SignalObject?
-	local remote = self.registeredSignals[signalName]
-	if not remote then
-		remote = self:_createSignal(signalName, isFunctionCall, isBindable, isUnreliable)
-	end
+function Networker:_getOrCreateWrapper(signalName: EventIdentifier)
 	if not self.signalWrappers[signalName] then
-		self.signalWrappers[signalName] = Signal.new()
+		local signal = Signal.new()
+		self.signalWrappers[signalName] = signal
+		
+		return signal
 	end
-	return remote
-end
-
--- Public API --
-
-function Networker:OnEvent(signalName: string): Signal.Signal
-	self:_getOrCreate(signalName, false, false, false)
+	
 	return self.signalWrappers[signalName]
 end
 
-function Networker:OnEventUnreliable(signalName: string): Signal.Signal
-	self:_getOrCreate(signalName, false, false, true)
-	return self.signalWrappers[signalName]
+function Networker:_setReceiving(signalName: EventIdentifier, func: Callback)
+	self.functionWrappers[signalName] = func
 end
 
-function Networker:OnBindableEvent(signalName: string): Signal.Signal
-	self:_getOrCreate(signalName, false, true, false)
-	return self.signalWrappers[signalName]
+function Networker:OnEvent(signalName: EventIdentifier): Signal.Signal
+	return self:_getOrCreateWrapper(signalName .. "_RE")
 end
 
-function Networker:OnInvoke(signalName: string): Signal.Signal
-	self:_getOrCreate(signalName, true, false, false)
-	return self.signalWrappers[signalName]
+function Networker:OnEventUnreliable(signalName: EventIdentifier): Signal.Signal
+	return self:_getOrCreateWrapper(signalName .. "_URE")
 end
 
-function Networker:OnBindableInvoke(signalName: string): Signal.Signal
-	self:_getOrCreate(signalName, true, true, false)
-	return self.signalWrappers[signalName]
+function Networker:OnBindableEvent(signalName: EventIdentifier): Signal.Signal
+	return self:_getOrCreateWrapper(signalName .. "_BE")
 end
 
-function Networker:FireClient(signalName: string, player: Player, ...: any)
+function Networker:OnInvoke(signalName: EventIdentifier, func: Callback)
+	self:_setReceiving(signalName .. "_RF", func)
+end
+
+function Networker:OnBindableInvoke(signalName: EventIdentifier, func: Callback)
+	self:_setReceiving(signalName .. "_BF", func)
+end
+
+function Networker:FireClient(signalName: string, player: Player, ...)
 	if IS_CLIENT then return end
-	local remote = self:_getOrCreate(signalName, false, false, false)
-	if remote and remote:IsA("RemoteEvent") then
-		remote:FireClient(player, ...)
+	local remote = self.instances["RemoteEvent"]
+	if remote and typeof(remote) == "Instance" and remote:IsA("RemoteEvent") then
+		remote:FireClient(player, signalName .. "_RE", ...)
 	end
 end
 
-function Networker:FireClientUnreliable(signalName: string, player: Player, ...: any)
+function Networker:FireAllClients(signalName: string, ...)
 	if IS_CLIENT then return end
-	local remote = self:_getOrCreate(signalName, false, false, true)
-	if remote and remote:IsA("UnreliableRemoteEvent") then
-		remote:FireClient(player, ...)
+	local remote = self.instances["RemoteEvent"]
+	if remote and typeof(remote) == "Instance" and remote:IsA("RemoteEvent") then
+		remote:FireAllClients(signalName .. "_RE", ...)
 	end
 end
 
-function Networker:FireAllClients(signalName: string, ...: any)
+function Networker:FireAllClientsExcept(signalName: string, exceptPlayer: Player, ...)
 	if IS_CLIENT then return end
-	local remote = self:_getOrCreate(signalName, false, false, false)
-	if remote and remote:IsA("RemoteEvent") then
-		remote:FireAllClients(...)
+	local remote = self.instances["RemoteEvent"]
+	if remote and typeof(remote) == "Instance" and remote:IsA("RemoteEvent") then
+		for _, player in Players:GetPlayers() do
+			if player == exceptPlayer then
+				continue
+			end
+			
+			remote:FireClient(player, signalName .. "_RE", ...)
+		end
 	end
 end
 
-function Networker:FireAllClientsUnreliable(signalName: string, ...: any)
+function Networker:FireClientUnreliable(signalName: string, player: Player, ...)
 	if IS_CLIENT then return end
-	local remote = self:_getOrCreate(signalName, false, false, true)
-	if remote and remote:IsA("UnreliableRemoteEvent") then
-		remote:FireAllClients(...)
+	local remote = self.instances["UnreliableRemoteEvent"]
+	if remote and typeof(remote) == "Instance" and remote:IsA("UnreliableRemoteEvent") then
+		remote:FireClient(player, signalName .. "_URE", ...)
 	end
 end
 
-function Networker:InvokeClient(signalName: string, player: Player, ...: any)
+function Networker:FireAllClientsUnreliable(signalName: string, ...)
 	if IS_CLIENT then return end
-	local remote = self:_getOrCreate(signalName, true, false, false)
-	if remote and remote:IsA("RemoteFunction") then
-		return remote:InvokeClient(player, ...)
+	local remote = self.instances["UnreliableRemoteEvent"]
+	if remote and typeof(remote) == "Instance" and remote:IsA("UnreliableRemoteEvent") then
+		remote:FireAllClients(signalName .. "_URE", ...)
 	end
 end
 
-function Networker:FireServer(signalName: string, ...: any)
+function Networker:FireAllClientsExceptUnreliable(signalName: string, exceptPlayer: Player, ...)
+	if IS_CLIENT then return end
+	local remote = self.instances["UnreliableRemoteEvent"]
+	if remote and typeof(remote) == "Instance" and remote:IsA("UnreliableRemoteEvent") then
+		for _, player in Players:GetPlayers() do
+			if player == exceptPlayer then
+				continue
+			end
+
+			remote:FireClient(player, signalName .. "_URE", ...)
+		end
+	end
+end
+
+function Networker:InvokeClient(signalName: string, player: Player, ...): any
+	if IS_CLIENT then return end
+	local remote = self.instances["RemoteFunction"]
+	if remote and typeof(remote) == "Instance" and remote:IsA("RemoteFunction") then
+		return remote:InvokeClient(player, signalName .. "_RF", ...)
+	end
+	return
+end
+
+function Networker:FireServer(signalName: string, ...)
 	if not IS_CLIENT then return end
-	local remote = self:_getOrCreate(signalName, false, false, false)
-	if remote then
-		self:_fireRemote(remote, ...)
+	local remote = self.instances["RemoteEvent"]
+	if remote and typeof(remote) == "Instance" and remote:IsA("RemoteEvent") then
+		remote:FireServer(signalName .. "_RE", ...)
 	end
 end
 
-function Networker:FireServerUnreliable(signalName: string, ...: any)
+function Networker:FireServerUnreliable(signalName: string, ...)
 	if not IS_CLIENT then return end
-	local remote = self:_getOrCreate(signalName, false, false, true)
-	if remote then
-		self:_fireRemote(remote, ...)
+	local remote = self.instances["UnreliableRemoteEvent"]
+	if remote and typeof(remote) == "Instance" and remote:IsA("UnreliableRemoteEvent") then
+		remote:FireServer(signalName .. "_URE", ...)
 	end
 end
 
-function Networker:InvokeServer(signalName: string, ...: any): any
+function Networker:InvokeServer(signalName: string, ...): any
 	if not IS_CLIENT then return end
-	local remote = self:_getOrCreate(signalName, true, false, false)
-	if remote then
-		return self:_fireRemote(remote, ...)
+	local remote = self.instances["RemoteFunction"]
+	if remote and typeof(remote) == "Instance" and remote:IsA("RemoteFunction") then
+		return remote:InvokeServer(signalName .. "_RF", ...)
 	end
-	return nil
+	return
 end
 
-function Networker:Fire(signalName: string, ...: any)
-	local remote = self:_getOrCreate(signalName, false, true, false)
-	if remote then
-		self:_fireRemote(remote, ...)
+function Networker:Fire(signalName: string, ...)
+	local remote = self.instances["BindableEvent"]
+	if remote and typeof(remote) == "Instance" and remote:IsA("BindableEvent") then
+		remote:Fire(signalName .. "_BE", ...)
 	end
 end
 
-function Networker:Invoke(signalName: string, ...: any): any
-	local remote = self:_getOrCreate(signalName, true, true, false)
-	if remote then
-		return self:_fireRemote(remote, ...)
+function Networker:Invoke(signalName: string, ...): any
+	local remote = self.instances["BindableFunction"]
+	if remote and typeof(remote) == "Instance" and remote:IsA("BindableFunction") then
+		return remote:Invoke(signalName .. "_BF", ...)
 	end
-	return nil
+	return
 end
 
 return Networker.new()

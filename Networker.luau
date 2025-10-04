@@ -30,6 +30,11 @@ export type Networker = {
 	functionWrappers: {[EventIdentifier]: Callback},
 	instances: {[string]: SignalObject},
 	
+	autoCleanup: boolean,
+	debug: boolean,
+	cleanupCoroutine: thread?,
+	cleanupInterval: number,
+	
 	_resolveExpectedObject: (self: Networker, Adornee: Instance, name: string) -> (Instance?),
 	_throwUnexpectedEvent: (self: Networker) -> (),
 	_init: (self: Networker) -> (),
@@ -37,6 +42,10 @@ export type Networker = {
 	_fireReceiver: (signalName: EventIdentifier, ...any) -> (),
 	_getOrCreateWrapper: (self: Networker, signalName: EventIdentifier) -> (Signal.Signal),
 	_setReceiving: (self: Networker, signalName: EventIdentifier, func: Callback) -> (),
+	
+	ClearUnusedSignals: (self: Networker) -> (),
+	EnableAutoCleanup: (self: Networker, interval: number?) -> (),
+	DisableAutoCleanup: (self: Networker) -> (),
 	
 	OnEvent: (self: Networker, signalName: EventIdentifier) -> (Signal.Signal),
 	OnEventUnreliable: (self: Networker, signalName: EventIdentifier) -> (Signal.Signal),
@@ -72,6 +81,10 @@ function Networker.new(): Networker
 	self.signalWrappers = {}
 	self.functionWrappers = {}
 	self.instances = {}
+	self.autoCleanup = false
+	self.debug = false
+	self.cleanupCoroutine = nil
+	self.cleanupInterval = 60
 	self:_init()
 	
 	_instance = self
@@ -161,6 +174,9 @@ function Networker:_fireWrapper(signalName: EventIdentifier, ...)
 		return
 	end
 	
+	if self.debug then
+		print("[Networker] Fired Signal Wrapper for signal:", signalName, "With Args:", ...)
+	end
 	wrapper:Fire(...)
 end
 
@@ -174,6 +190,9 @@ function Networker:_fireReceiver(signalName: EventIdentifier, ...)
 		return
 	end
 	
+	if self.debug then
+		print("[Networker] Fired Function Receiver for signal:", signalName, "With Args:", ...)
+	end
 	return receiver(...)
 end
 
@@ -190,6 +209,59 @@ end
 
 function Networker:_setReceiving(signalName: EventIdentifier, func: Callback)
 	self.functionWrappers[signalName] = func
+end
+
+function Networker:ClearUnusedSignals()
+	local clearedSignals = {}
+	for key, signal in self.signalWrappers do
+		if signal:HasConnections() then
+			continue
+		end
+		
+		signal:Destroy()
+		self.signalWrappers[key] = nil
+		
+		table.insert(clearedSignals, key)
+	end
+	
+	if self.debug then
+		print("[Networker] Cleared", #clearedSignals, "Signals with signalNames:", unpack(clearedSignals))
+	end
+end
+
+function Networker:EnableAutoCleanup(interval: number?)
+	if self.autoCleanup then
+		return
+	end
+	self.autoCleanup = true
+	
+	if interval then
+		self.cleanupInterval = interval
+	end
+	
+	if self.cleanupCoroutine and typeof(self.cleanupCoroutine) == "thread" then
+		coroutine.close(self.cleanupCoroutine)
+	end
+	
+	self.cleanupCoroutine = coroutine.create(function()
+		while self.autoCleanup do
+			task.wait(self.cleanupInterval)
+			self:ClearUnusedSignals()
+		end
+	end)
+	coroutine.resume(self.cleanupCoroutine)
+end
+
+function Networker:DisableAutoCleanup()
+	if not self.autoCleanup then
+		return
+	end
+	self.autoCleanup = false
+	
+	if self.cleanupCoroutine and typeof(self.cleanupCoroutine) == "thread" then
+		coroutine.close(self.cleanupCoroutine)
+		self.cleanupCoroutine = nil
+	end
 end
 
 function Networker:OnEvent(signalName: EventIdentifier): Signal.Signal

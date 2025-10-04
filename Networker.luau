@@ -110,7 +110,12 @@ function Networker:_resolveExpectedObject(Adornee: Instance, name: string)
 end
 
 function Networker:_throwUnexpectedEvent()
-	error("Event was fired but no EventIdentifier was attached.", 2)
+	local msg = "Event was fired but no EventIdentifier was attached, did you modify I/O?"
+	if self.strict then
+		error(msg, 2)
+	else
+		warn(msg)
+	end
 end
 
 function Networker:_init()

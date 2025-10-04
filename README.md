@@ -43,6 +43,8 @@ local Networker = require(path.to.Networker)
 
 The Networker is a singleton – requiring it anywhere in your codebase will always return the same instance.
 
+NOTE: Use the "strict" variable only in debug/testing places, enabling this on the Server in a public place could cause your Server code to crash if a Client calls an invalid event on any event object.
+
 ---
 
 ## API Reference

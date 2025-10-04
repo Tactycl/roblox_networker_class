@@ -114,7 +114,7 @@ function Networker:_init()
 		self.Folder.Name = FOLDER_NAME
 
 		for _, instanceName in EVENT_INSTANCES do
-			local instance = Instance.new(instanceName)
+			local instance = self.Folder:FindFirstChildOfClass(instanceName) or Instance.new(instanceName)
 			instance.Name = instanceName
 			instance.Parent = self.Folder
 		end

@@ -32,6 +32,7 @@ export type Networker = {
 
 	autoCleanup: boolean,
 	debug: boolean,
+	strict: boolean,
 	cleanupCoroutine: thread?,
 	cleanupInterval: number,
 
@@ -83,6 +84,7 @@ function Networker.new(): Networker
 	self.instances = {}
 	self.autoCleanup = false
 	self.debug = false
+	self.strict = true
 	self.cleanupCoroutine = nil
 	self.cleanupInterval = 60
 	self:_init()
@@ -95,7 +97,13 @@ function Networker:_resolveExpectedObject(Adornee: Instance, name: string)
 	local object = Adornee:WaitForChild(name, 5)
 	if not object then
 		local networkSide = if IS_CLIENT then "client" else "server"
-		error("Failed to require 'Networker' on the " .. networkSide .. ". Check if you require 'Networker' on both client and server on startup.")
+		local msg = string.format("Failed to require 'Networker' on the %s. Check if you require 'Networker' on both client and server on startup.", networkSide)
+
+		if self.strict then
+			error(msg, 2)
+		else
+			warn(msg)
+		end
 	end
 
 	return object
@@ -108,6 +116,9 @@ end
 function Networker:_init()
 	if IS_CLIENT then
 		self.Folder = self:_resolveExpectedObject(ReplicatedStorage, FOLDER_NAME)
+		if not self.Folder then
+			return
+		end
 
 	else
 		self.Folder = ReplicatedStorage:FindFirstChild(FOLDER_NAME) or Instance.new("Folder")
@@ -124,6 +135,9 @@ function Networker:_init()
 
 	for _, instanceName in EVENT_INSTANCES do
 		local instance = self:_resolveExpectedObject(self.Folder, instanceName)
+		if not instance then
+			continue
+		end
 
 		if instance:IsA("RemoteEvent") or instance:IsA("UnreliableRemoteEvent") then
 			if IS_CLIENT then

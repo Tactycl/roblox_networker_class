@@ -224,8 +224,8 @@ function Networker:ClearUnusedSignals()
 		table.insert(clearedSignals, key)
 	end
 	
-	if self.debug then
-		print("[Networker] Cleared", #clearedSignals, "Signals with signalNames:", unpack(clearedSignals))
+	if self.debug and #clearedSignals > 0 then
+		print("[Networker] Cleared", #clearedSignals, "Signal(s) with signalName(s):", unpack(clearedSignals))
 	end
 end
 

@@ -19,6 +19,11 @@ local EVENT_INSTANCES = {
 	"BindableFunction",
 }
 
+local ERROR_MESSAGES = {
+	UNEXPECTED_OBJECT = "Failed to require 'Networker' on the %s, expected %s but got %s. Is 'Networker' being required on both client and server?",
+	NO_EVENT_IDENTIFIER = "Event was fired but no EventIdentifier was attached, Event was modified.",
+}
+
 type SignalObject = RemoteEvent | UnreliableRemoteEvent | BindableEvent | RemoteFunction | BindableFunction
 type EventIdentifier = string
 type Callback = (...any) -> (...any)
@@ -37,7 +42,7 @@ export type Networker = {
 	cleanupInterval: number,
 
 	_resolveExpectedObject: (self: Networker, Adornee: Instance, name: string) -> (Instance?),
-	_throwUnexpectedEvent: (self: Networker) -> (),
+	_throwUnexpectedEvent: (self: Networker, errorMessage: string, ...any) -> (),
 	_init: (self: Networker) -> (),
 	_fireWrapper: (signalName: EventIdentifier, ...any) -> (),
 	_fireReceiver: (signalName: EventIdentifier, ...any) -> (),
@@ -84,7 +89,7 @@ function Networker.new(): Networker
 	self.instances = {}
 	self.autoCleanup = false
 	self.debug = false
-	self.strict = true
+	self.strict = false
 	self.cleanupCoroutine = nil
 	self.cleanupInterval = 60
 	self:_init()
@@ -96,23 +101,17 @@ end
 function Networker:_resolveExpectedObject(Adornee: Instance, name: string)
 	local object = Adornee:WaitForChild(name, 5)
 	if not object then
-		local networkSide = if IS_CLIENT then "client" else "server"
-		local msg = string.format("Failed to require 'Networker' on the %s. Check if you require 'Networker' on both client and server on startup.", networkSide)
-
-		if self.strict then
-			error(msg, 2)
-		else
-			warn(msg)
-		end
+		self:_throwUnexpectedEvent(ERROR_MESSAGES.UNEXPECTED_OBJECT, if IS_CLIENT then "client" else "server", name, tostring(object))
 	end
 
 	return object
 end
 
-function Networker:_throwUnexpectedEvent()
-	local msg = "Event was fired but no EventIdentifier was attached, did you modify I/O?"
+function Networker:_throwUnexpectedEvent(errorMessage: string, ...)
+	local msg = string.format("[Networker] " .. errorMessage, ...)
 	if self.strict then
 		error(msg, 2)
+		
 	else
 		warn(msg)
 	end
@@ -185,7 +184,7 @@ end
 
 function Networker:_fireWrapper(signalName: EventIdentifier, ...)
 	if typeof(signalName) ~= "string" then
-		self:_throwUnexpectedEvent()
+		self:_throwUnexpectedEvent(ERROR_MESSAGES.NO_EVENT_IDENTIFIER)
 	end
 
 	local wrapper = self.signalWrappers[signalName]
@@ -201,7 +200,7 @@ end
 
 function Networker:_fireReceiver(signalName: EventIdentifier, ...)
 	if typeof(signalName) ~= "string" then
-		self:_throwUnexpectedEvent()
+		self:_throwUnexpectedEvent(ERROR_MESSAGES.NO_EVENT_IDENTIFIER)
 	end
 
 	local receiver = self.functionWrappers[signalName]

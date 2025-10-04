@@ -25,16 +25,16 @@ type Callback = (...any) -> (...any)
 
 export type Networker = {
 	Folder: Folder?,
-	
+
 	signalWrappers: {[EventIdentifier]: Signal.Signal},
 	functionWrappers: {[EventIdentifier]: Callback},
 	instances: {[string]: SignalObject},
-	
+
 	autoCleanup: boolean,
 	debug: boolean,
 	cleanupCoroutine: thread?,
 	cleanupInterval: number,
-	
+
 	_resolveExpectedObject: (self: Networker, Adornee: Instance, name: string) -> (Instance?),
 	_throwUnexpectedEvent: (self: Networker) -> (),
 	_init: (self: Networker) -> (),
@@ -42,30 +42,30 @@ export type Networker = {
 	_fireReceiver: (signalName: EventIdentifier, ...any) -> (),
 	_getOrCreateWrapper: (self: Networker, signalName: EventIdentifier) -> (Signal.Signal),
 	_setReceiving: (self: Networker, signalName: EventIdentifier, func: Callback) -> (),
-	
+
 	ClearUnusedSignals: (self: Networker) -> (),
 	EnableAutoCleanup: (self: Networker, interval: number?) -> (),
 	DisableAutoCleanup: (self: Networker) -> (),
-	
+
 	OnEvent: (self: Networker, signalName: EventIdentifier) -> (Signal.Signal),
 	OnEventUnreliable: (self: Networker, signalName: EventIdentifier) -> (Signal.Signal),
 	OnBindableEvent: (self: Networker, signalName: EventIdentifier) -> (Signal.Signal),
 	OnInvoke: (self: Networker, signalName: EventIdentifier, func: Callback) -> (),
 	OnBindableInvoke: (self: Networker, signalName: EventIdentifier, func: Callback) -> (),
-	
+
 	FireClient: (self: Networker, signalName: EventIdentifier, player: Player, ...any) -> (),
 	FireAllClients: (self: Networker, signalName: EventIdentifier, ...any) -> (),
 	FireAllClientsExcept: (self: Networker, signalName: EventIdentifier, exceptPlayer: Player, ...any) -> (),
-	
+
 	FireClientUnreliable: (self: Networker, signalName: EventIdentifier, player: Player, ...any) -> (),
 	FireAllClientsUnreliable: (self: Networker, signalName: EventIdentifier, ...any) -> (),
 	FireAllClientsExceptUnreliable: (self: Networker, signalName: EventIdentifier, exceptPlayer: Player, ...any) -> (),
-	
+
 	FireServer: (self: Networker, signalName: EventIdentifier, ...any) -> (),
 	FireServerUnreliable: (self: Networker, signalName: EventIdentifier, ...any) -> (),
-	
+
 	Fire: (self: Networker, signalName: EventIdentifier, ...any) -> (),
-	
+
 	InvokeClient: (self: Networker, signalName: EventIdentifier, player: Player, ...any) -> (...any),
 	InvokeServer: (self: Networker, signalName: EventIdentifier, ...any) -> (...any),
 	Invoke: (self: Networker, signalName: EventIdentifier, ...any) -> (...any),
@@ -75,7 +75,7 @@ function Networker.new(): Networker
 	if _instance then
 		return _instance
 	end
-	
+
 	local self = (setmetatable({}, Networker):: unknown):: Networker
 	self.Folder = nil
 	self.signalWrappers = {}
@@ -86,7 +86,7 @@ function Networker.new(): Networker
 	self.cleanupCoroutine = nil
 	self.cleanupInterval = 60
 	self:_init()
-	
+
 	_instance = self
 	return self
 end
@@ -97,7 +97,7 @@ function Networker:_resolveExpectedObject(Adornee: Instance, name: string)
 		local networkSide = if IS_CLIENT then "client" else "server"
 		error("Failed to require 'Networker' on the " .. networkSide .. ". Check if you require 'Networker' on both client and server on startup.")
 	end
-	
+
 	return object
 end
 
@@ -108,58 +108,58 @@ end
 function Networker:_init()
 	if IS_CLIENT then
 		self.Folder = self:_resolveExpectedObject(ReplicatedStorage, FOLDER_NAME)
-		
+
 	else
 		self.Folder = ReplicatedStorage:FindFirstChild(FOLDER_NAME) or Instance.new("Folder")
 		self.Folder.Name = FOLDER_NAME
-		
+
 		for _, instanceName in EVENT_INSTANCES do
 			local instance = Instance.new(instanceName)
 			instance.Name = instanceName
 			instance.Parent = self.Folder
 		end
-		
+
 		self.Folder.Parent = ReplicatedStorage
 	end
-	
+
 	for _, instanceName in EVENT_INSTANCES do
 		local instance = self:_resolveExpectedObject(self.Folder, instanceName)
-		
+
 		if instance:IsA("RemoteEvent") or instance:IsA("UnreliableRemoteEvent") then
 			if IS_CLIENT then
 				instance.OnClientEvent:Connect(function(signalName: EventIdentifier, ...)
 					self:_fireWrapper(signalName, ...)
 				end)
-				
+
 			else
 				instance.OnServerEvent:Connect(function(player: Player, signalName: EventIdentifier, ...)
 					self:_fireWrapper(signalName, unpack({player, ...}))
 				end)
 			end
-			
+
 		elseif instance:IsA("BindableEvent") then
 			instance.Event:Connect(function(signalName: EventIdentifier, ...)
 				self:_fireWrapper(signalName, ...)
 			end)
-			
+
 		elseif instance:IsA("RemoteFunction") then
 			if IS_CLIENT then
 				instance.OnClientInvoke = function(signalName: EventIdentifier, ...)
 					return self:_fireReceiver(signalName, ...)
 				end
-				
+
 			else
-				instance.OnServerInvoke = function(signalName: EventIdentifier, ...)
-					return self:_fireReceiver(signalName, ...)
+				instance.OnServerInvoke = function(player: Player, signalName: EventIdentifier, ...)
+					return self:_fireReceiver(signalName, unpack({player, ...}))
 				end
 			end
-			
+
 		elseif instance:IsA("BindableFunction") then
 			instance.OnInvoke = function(signalName: EventIdentifier, ...)
 				return self:_fireReceiver(signalName, ...)
 			end
 		end
-		
+
 		self.instances[instanceName] = instance
 	end
 end
@@ -168,12 +168,12 @@ function Networker:_fireWrapper(signalName: EventIdentifier, ...)
 	if typeof(signalName) ~= "string" then
 		self:_throwUnexpectedEvent()
 	end
-	
+
 	local wrapper = self.signalWrappers[signalName]
 	if not wrapper then
 		return
 	end
-	
+
 	if self.debug then
 		print("[Networker] Fired Signal Wrapper for signal:", signalName, "With Args:", ...)
 	end
@@ -184,12 +184,12 @@ function Networker:_fireReceiver(signalName: EventIdentifier, ...)
 	if typeof(signalName) ~= "string" then
 		self:_throwUnexpectedEvent()
 	end
-	
+
 	local receiver = self.functionWrappers[signalName]
 	if not receiver then
 		return
 	end
-	
+
 	if self.debug then
 		print("[Networker] Fired Function Receiver for signal:", signalName, "With Args:", ...)
 	end
@@ -200,10 +200,10 @@ function Networker:_getOrCreateWrapper(signalName: EventIdentifier)
 	if not self.signalWrappers[signalName] then
 		local signal = Signal.new()
 		self.signalWrappers[signalName] = signal
-		
+
 		return signal
 	end
-	
+
 	return self.signalWrappers[signalName]
 end
 
@@ -217,13 +217,13 @@ function Networker:ClearUnusedSignals()
 		if signal:HasConnections() then
 			continue
 		end
-		
+
 		signal:Destroy()
 		self.signalWrappers[key] = nil
-		
+
 		table.insert(clearedSignals, key)
 	end
-	
+
 	if self.debug and #clearedSignals > 0 then
 		print("[Networker] Cleared", #clearedSignals, "Signal(s) with signalName(s):", unpack(clearedSignals))
 	end
@@ -234,15 +234,15 @@ function Networker:EnableAutoCleanup(interval: number?)
 		return
 	end
 	self.autoCleanup = true
-	
+
 	if interval then
 		self.cleanupInterval = interval
 	end
-	
+
 	if self.cleanupCoroutine and typeof(self.cleanupCoroutine) == "thread" then
 		coroutine.close(self.cleanupCoroutine)
 	end
-	
+
 	self.cleanupCoroutine = coroutine.create(function()
 		while self.autoCleanup do
 			task.wait(self.cleanupInterval)
@@ -257,7 +257,7 @@ function Networker:DisableAutoCleanup()
 		return
 	end
 	self.autoCleanup = false
-	
+
 	if self.cleanupCoroutine and typeof(self.cleanupCoroutine) == "thread" then
 		coroutine.close(self.cleanupCoroutine)
 		self.cleanupCoroutine = nil
@@ -308,7 +308,7 @@ function Networker:FireAllClientsExcept(signalName: string, exceptPlayer: Player
 			if player == exceptPlayer then
 				continue
 			end
-			
+
 			remote:FireClient(player, signalName .. "_RE", ...)
 		end
 	end
